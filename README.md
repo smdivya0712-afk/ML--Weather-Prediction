@@ -18,63 +18,68 @@ To write a program to predict daily temperature , PM2.5 pollution level and Ener
 
 ## Program:
 ```
-#Ex 10 - Implementation of K Means Clustering for Customer Segmentation
-# Import libraries
-import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
-# ------------------------------
-# Step 1: Sample dataset
-# ------------------------------
-data = {
-    'CustomerID': [1,2,3,4,5,6,7,8,9,10],
-    'Gender': ['Male','Female','Female','Male','Female','Male','Male','Female','Female','Male'],
-    'Age': [19,21,20,23,31,22,35,30,25,28],
-    'Annual Income (k$)': [15,16,17,18,19,20,21,22,23,24],
-    'Spending Score (1-100)': [39,81,6,77,40,76,6,94,3,72]
-}
+# ==============================================================================
+# 1. LOAD & CLEAN DATA
+# ==============================================================================
+# Read raw CSV and fix column whitespace
+df = pd.read_csv("weather-station-eee-block_2024_07_13.csv")
+df.columns = df.columns.str.strip()
 
-df = pd.DataFrame(data)
+# 1.1 Chronological Sorting: Ensure time flows correctly
+df['time'] = pd.to_datetime(df['time'])
+df = df.sort_values('time').reset_index(drop=True)
 
-# ------------------------------
-# Step 2: Select features for clustering
-# ------------------------------
-X = df[['Annual Income (k$)', 'Spending Score (1-100)']]
+# 1.2 Interpolation: Fill gaps (up to 10 rows) to keep the timeline continuous
+cols_to_fill = ['tem', 'pm2_5', 'tsr', 'hum', 'pressure', 'wind_speed', 'illumination', 'co2']
+for col in cols_to_fill:
+    if col in df.columns:
+        df[col] = df[col].interpolate(method='linear', limit=10)
 
-# ------------------------------
-# Step 3: Apply K-Means (choose clusters, e.g., 3)
-# ------------------------------
-kmeans = KMeans(n_clusters=3, init='k-means++', random_state=42)
-df['Cluster'] = kmeans.fit_predict(X)  # Automatically fits and assigns clusters
+# ==============================================================================
+# 2. FEATURE ENGINEERING
+# ==============================================================================
+# 2.1 Cyclical Time Features: Convert hour into circle coordinates (Sin/Cos)
+df['hour'] = df['time'].dt.hour
+df['hour_sin'] = np.sin(2 * np.pi * df['hour'] / 24)
+df['hour_cos'] = np.cos(2 * np.pi * df['hour'] / 24)
 
-# ------------------------------
-# Step 4: Visualize clusters
-# ------------------------------
-plt.figure(figsize=(8,6))
-for i in range(3):
-    plt.scatter(X[df['Cluster']==i]['Annual Income (k$)'],
-                X[df['Cluster']==i]['Spending Score (1-100)'],
-                label=f'Cluster {i+1}')
+# 2.2 Lag Features: Give the model 'Memory' of what happened 1 and 2 steps ago
+targets = ['tem', 'pm2_5', 'tsr']
+for t in targets:
+    df[f'{t}_lag1'] = df[t].shift(1)
+    df[f'{t}_lag2'] = df[t].shift(2)
 
-# Plot centroids
-plt.scatter(kmeans.cluster_centers_[:,0], kmeans.cluster_centers_[:,1],
-            s=200, c='yellow', label='Centroids', marker='X')
+# 2.3 Cleanup: Drop rows where lags are NaN and save processed data
+processed_df = df.dropna(subset=['tem_lag2', 'pm2_5_lag2', 'tsr_lag2', 'hum', 'pressure']).reset_index(drop=True)
+processed_df.to_csv("combined_processed_weather_data.csv", index=False)
 
-plt.title('Customer Segmentation (K-Means)')
-plt.xlabel('Annual Income (k$)')
-plt.ylabel('Spending Score (1-100)')
-plt.legend()
-plt.show()
-
-# ------------------------------
-# Step 5: Show dataset with clusters
-# ------------------------------
-print(df)
+# Define the final high-performance feature set
+features = [
+    'hum', 'pressure', 'wind_speed', 'illumination', 'co2',
+    'hour_sin', 'hour_cos', 'tem_lag1', 'pm2_5_lag1', 'tsr_lag1'
+]
+# Print summary of feature engineering
+print("--- Feature Engineering Summary ---")
+print(f"Original rows: {len(df)}")
+print(f"Processed rows (after lags/cleaning): {len(processed_df)}")
+print(f"Final high-performance feature set:",features)
+# ==============================================================================
+# 3. TRAIN-TEST SPLIT (Chronological)
+# ==============================================================================
+# Take the first 80% for training and the final 20% for testing (no shuffling)
+split_idx = int(len(processed_df) * 0.8)
+train, test = processed_df.iloc[:split_idx], processed_df.iloc[split_idx:]
+X_train, X_test = train[features], test[features]
 ```
 
 ## Output:
-<img width="1920" height="1080" alt="Screenshot (104)" src="https://github.com/user-attachments/assets/01903686-2c7a-4734-8713-fb7e3214f628" />
+<img width="1080" height="1402" alt="image" src="https://github.com/user-attachments/assets/e3408627-0564-4e5d-87c9-a06e5fbac613" />
+
 
 
 ## Result:
